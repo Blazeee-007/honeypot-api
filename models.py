@@ -7,9 +7,9 @@ class Intelligence(BaseModel):
     phishing_links: List[str] = Field(default_factory=list)
 
 class EngageRequest(BaseModel):
-    conversation_id: str
+    conversation_id: Optional[str] = Field(default="unknown")
     incoming_message: str
-    history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+    history: Optional[List[Any]] = Field(default_factory=list)
 
 class EngageResponse(BaseModel):
     status: str

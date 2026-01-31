@@ -100,7 +100,12 @@ class HoneyPotAgent:
                     "Try to get their UPI/bank account for 'manual payment'."
                 )
                 messages = [{"role": "system", "content": system_prompt}]
-                if history: messages.extend(history[-3:])
+                if history:
+                    # Robust cleaning: only take items that look like valid messages
+                    for m in history[-5:]:
+                        if isinstance(m, dict) and "role" in m and "content" in m:
+                            messages.append({"role": m["role"], "content": m["content"]})
+                    
                 messages.append({"role": "user", "content": message})
                 
                 resp = self.client.chat.completions.create(
