@@ -16,5 +16,3 @@ class EngageResponse(BaseModel):
     is_scam: bool
     response_text: str
     intelligence: Intelligence
-    suggested_delay_seconds: float = Field(default=2.0)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
