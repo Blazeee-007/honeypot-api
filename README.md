@@ -29,7 +29,23 @@ OPENAI_MODEL=gpt-3.5-turbo
 DATABASE_URL=sqlite:///./honeypot.db
 ```
 
-## 📦 Run Locally
-1. `pip install -r requirements.txt`
-2. `uvicorn main:app --reload`
-3. Access docs at `http://localhost:8000/docs`
+## 🧪 Validation Testing
+A dedicated validation script `tester.py` is included to verify the production readiness of the API.
+
+### What This Tests:
+- **API Authentication** using headers (`X-API-KEY`).
+- **Endpoint Availability** and connectivity.
+- **Proper Request Handling** with Pydantic validation.
+- **Response Structure** and status codes.
+- **Basic Honeypot Behavior** validation (Scam detection & extraction).
+
+> **Note:** This tester is for validation only. The final evaluation will involve automated security interaction scenarios.
+
+### How to Run the Tester:
+```bash
+# Test Local
+python tester.py http://localhost:8000 agentic-honeypot-secret-key
+
+# Test Deployed (Render)
+python tester.py https://honeypot-api-cg90.onrender.com agentic-honeypot-secret-key
+```
