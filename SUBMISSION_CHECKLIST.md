@@ -37,6 +37,9 @@ Before submitting, test your live endpoint using `curl` or Postman.
 }
 ```
 
+*Note: The API now accepts `incoming_message`, `text`, `message`, or `content` fields to ensure compatibility with external testers.*
+
+
 ## 3. Submission Form Details
 - **API Endpoint URL**: `https://<your-project>.vercel.app/v1/honeypot/engage`
   - *Note: Ensure you include the full path `/v1/honeypot/engage`, not just the domain.*
