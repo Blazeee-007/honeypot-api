@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from models import EngageRequest, EngageResponse
+from typing import Dict, Any
 from auth import get_api_key
 from agent import HoneyPotAgent
 import uvicorn
@@ -54,28 +55,50 @@ async def root():
 
 @app.post("/v1/honeypot/engage", response_model=EngageResponse, tags=["Agent Logic"])
 async def engage(
-    request: EngageRequest, 
+    payload: Dict[str, Any] = Body(...),
     api_key: str = Depends(get_api_key),
     db: Session = Depends(get_db)
 ):
     """
     Engages with a potential scammer, classifies the intent, 
     and extracts intelligence. Saves interaction to DB.
+    Accepts generic JSON to support various tester formats.
     """
-    logger.info(f"Incoming engagement: conv_id={request.conversation_id}")
+    # Flexible Extraction Logic
+    incoming_message = (
+        payload.get("incoming_message") or 
+        payload.get("text") or 
+        payload.get("message") or 
+        payload.get("content") or 
+        payload.get("input") or
+        payload.get("prompt")
+    )
+    
+    conversation_id = payload.get("conversation_id", "unknown")
+    history = payload.get("history", [])
+
+    if not incoming_message:
+        # If we still can't find it, dump the keys to help user debug (in logs)
+        print(f"DEBUG: Failed to find message in payload keys: {list(payload.keys())}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Could not find a valid message field in request. Tried: incoming_message, text, message, content, input"
+        )
+
+    logger.info(f"Incoming engagement: conv_id={conversation_id}")
     start_time = time.time()
     
     try:
         is_scam, response_text, intelligence, delay = await agent.engage(
-            request.incoming_message, 
-            request.history
+            incoming_message, 
+            history
         )
         process_time = time.time() - start_time
         
         # Save to Database for persistence (The "Production" way)
         db_interaction = Interaction(
-            id=f"{request.conversation_id}_{int(time.time())}",
-            incoming_message=request.incoming_message,
+            id=f"{conversation_id}_{int(time.time())}",
+            incoming_message=incoming_message,
             response_text=response_text,
             is_scam=is_scam,
             upi_ids=intelligence.upi_ids,
@@ -102,6 +125,21 @@ async def engage(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred."
         )
+
+@app.get("/v1/honeypot/engage", tags=["Help"])
+async def engage_browser_check():
+    """
+    Helper endpoint for browser-based validation.
+    """
+    return {
+        "status": "ready",
+        "message": "The Honeypot API is live! Send a POST request to this endpoint to engage the agent.",
+        "usage_example": {
+            "method": "POST",
+            "headers": {"X-API-KEY": "your-key", "Content-Type": "application/json"},
+            "body": {"incoming_message": "Hello"}
+        }
+    }
 
 @app.get("/v1/honeypot/intelligence", tags=["Intelligence"])
 async def get_intelligence(
