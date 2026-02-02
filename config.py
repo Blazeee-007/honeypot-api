@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+import os
 
 class Settings(BaseSettings):
     # API Security
@@ -10,7 +11,8 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-3.5-turbo"
     
     # Database Configuration
-    DATABASE_URL: str = "sqlite:///./honeypot.db"
+    # Automatically use /tmp for SQLite on Vercel to avoid Read-Only errors
+    DATABASE_URL: str = "sqlite:////tmp/honeypot.db" if os.environ.get("VERCEL") else "sqlite:///./honeypot.db"
     
     # App Metadata
     APP_NAME: str = "Agentic HoneyPot API"

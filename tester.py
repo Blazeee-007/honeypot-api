@@ -13,7 +13,7 @@ def test_honeypot(base_url, api_key):
 
     # 1. Test Authentication (Missing Key)
     print("[1/5] Testing Authentication (Missing Key)...", end=" ")
-    r = requests.post(f"{base_url}/v1/honeypot/engage", json={})
+    r = requests.post(f"{base_url}/v1/honeypot/engage", json={"incoming_message": "test"})
     if r.status_code == 401:
         print("✅ PASS (Received 401)")
     else:

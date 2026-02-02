@@ -93,7 +93,8 @@ async def engage(
             status="success",
             is_scam=is_scam,
             response_text=response_text,
-            intelligence=intelligence
+            intelligence=intelligence,
+            suggested_delay_seconds=delay
         )
     except Exception as e:
         logger.error(f"Error in engagement: {str(e)}")
