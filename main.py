@@ -10,6 +10,7 @@ from agent import HoneyPotAgent
 import uvicorn
 import logging
 import time
+import json
 
 # Configure Logging
 logging.basicConfig(
@@ -76,6 +77,12 @@ async def engage(
         payload.get("input") or
         payload.get("prompt")
     )
+
+    # Ensure message is a string (handle nested JSON inputs)
+    if isinstance(incoming_message, (dict, list)):
+        incoming_message = json.dumps(incoming_message)
+    elif incoming_message is not None and not isinstance(incoming_message, str):
+        incoming_message = str(incoming_message)
     
     conversation_id = payload.get("conversation_id", "unknown")
     history = payload.get("history", [])
