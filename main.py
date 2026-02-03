@@ -1,3 +1,6 @@
+"""
+Participants must design an autonomous AI honeypot system that detects scam messages and actively engages scammers using a believable persona. Once a scam is detected, the AI agent must continue the conversation to extract bank account details, UPI IDs, and phishing links. Interactions will be simulated using a Mock Scammer API, and outputs must be returned in a structured JSON format.
+"""
 from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from models import EngageRequest, EngageResponse

@@ -1,3 +1,6 @@
+"""
+This Honeypot API Endpoint Tester allows participants to validate whether their deployed honeypot service is reachable, secured, and responding correctly. The tester verifies authentication, endpoint availability, and response behavior using a simple request.
+"""
 import requests
 import json
 import sys

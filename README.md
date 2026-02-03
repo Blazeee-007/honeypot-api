@@ -1,6 +1,6 @@
 # 👵 Agentic HoneyPot for Scam Detection
 
-A production-ready autonomous AI agent designed to detect scammers, engage them using a "vulnerable elderly citizen" persona, and extract intelligence (UPI IDs, bank accounts, phishing links) for defensive purposes.
+Participants must design an autonomous AI honeypot system that detects scam messages and actively engages scammers using a believable persona. Once a scam is detected, the AI agent must continue the conversation to extract bank account details, UPI IDs, and phishing links. Interactions will be simulated using a Mock Scammer API, and outputs must be returned in a structured JSON format.
 
 ## 🚀 Features
 - **Persona-Driven Engagement**: Uses a "Martha" persona (74 years old) with realistic typing flaws and human-like delays.
@@ -30,7 +30,7 @@ DATABASE_URL=sqlite:///./honeypot.db
 ```
 
 ## 🧪 Validation Testing
-A dedicated validation script `tester.py` is included to verify the production readiness of the API.
+This Honeypot API Endpoint Tester (`tester.py`) allows participants to validate whether their deployed honeypot service is reachable, secured, and responding correctly. The tester verifies authentication, endpoint availability, and response behavior using a simple request.
 
 ### What This Tests:
 - **API Authentication** using headers (`X-API-KEY`).
