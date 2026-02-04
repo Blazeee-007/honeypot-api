@@ -1,7 +1,7 @@
 """
 Participants must design an autonomous AI honeypot system that detects scam messages and actively engages scammers using a believable persona. Once a scam is detected, the AI agent must continue the conversation to extract bank account details, UPI IDs, and phishing links. Interactions will be simulated using a Mock Scammer API, and outputs must be returned in a structured JSON format.
 """
-from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks, Body
+from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from models import EngageRequest, EngageResponse
 from auth import get_api_key
@@ -116,7 +116,7 @@ async def root():
 
 @app.post("/v1/honeypot/engage", response_model=EngageResponse, tags=["Agent Logic"])
 async def engage(
-    payload: Dict[str, Any] = Body(...),
+    request: Request,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     api_key: str = Depends(get_api_key),
     db: Session = Depends(get_db)
@@ -125,6 +125,28 @@ async def engage(
     Main endpoint for the Honeypot. 
     Accepts flexible input but prioritizes the Hackathon Spec.
     """
+    # 0. Robust definition of payload
+    try:
+        body_bytes = await request.body()
+        if not body_bytes:
+            payload = {}
+        else:
+            payload = await request.json()
+    except Exception as e:
+        logger.warning(f"Failed to parse JSON body: {e}")
+        # Try to treat as form or just empty
+        payload = {}
+
+    # Handle if payload is a list (some testers send [msg1, msg2])
+    if isinstance(payload, list):
+        if payload:
+            payload = payload[-1] # Take the last item
+        else:
+            payload = {}
+            
+    if not isinstance(payload, dict):
+        payload = {}
+
     # 1. robust extraction of Session ID
     session_id = payload.get("sessionId") or payload.get("conversation_id") or f"gen-{int(time.time())}"
     
