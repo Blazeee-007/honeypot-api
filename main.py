@@ -1,16 +1,16 @@
 """
 Participants must design an autonomous AI honeypot system that detects scam messages and actively engages scammers using a believable persona. Once a scam is detected, the AI agent must continue the conversation to extract bank account details, UPI IDs, and phishing links. Interactions will be simulated using a Mock Scammer API, and outputs must be returned in a structured JSON format.
 """
-from fastapi import FastAPI, Depends, HTTPException, status, Body
+from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from models import EngageRequest, EngageResponse
-from typing import Dict, Any
 from auth import get_api_key
 from agent import HoneyPotAgent
 import uvicorn
 import logging
 import time
-import json
+import requests
+from typing import List
 
 # Configure Logging
 logging.basicConfig(
@@ -29,7 +29,7 @@ app = FastAPI(
 # Enable CORS (Critical for frontends)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In strict production, replace with your dashboard domain
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +48,63 @@ def startup_event():
     init_db()
     logger.info("Database initialized.")
 
+def send_guvi_callback(session_id: str, db: Session):
+    """
+    Aggregates intelligence for the session and sends the mandatory callback.
+    """
+    try:
+        # 1. Aggregate Intelligence from DB
+        interactions = db.query(Interaction).filter(Interaction.id.like(f"{session_id}%")).all()
+        
+        if not interactions:
+            return
+
+        aggregated_intel = {
+            "bankAccounts": set(),
+            "upiIds": set(),
+            "phishingLinks": set(),
+            "phoneNumbers": set(),
+            "suspiciousKeywords": set()
+        }
+        
+        scam_detected = False
+        total_messages = len(interactions) * 2 # Crude approximation (User + Agent) or just count rows? Input says "Total messages exchanged". 
+        # Better: use conversationHistory length from the last request + 2 (latest exchange). 
+        # But we only have DB rows here. Let's start with rows count (each row is one turn).
+        
+        for i in interactions:
+            if i.is_scam:
+                scam_detected = True
+            
+            # Safely add to sets (handle internal lists)
+            if i.bank_accounts: aggregated_intel["bankAccounts"].update(i.bank_accounts)
+            if i.upi_ids: aggregated_intel["upiIds"].update(i.upi_ids)
+            if i.phishing_links: aggregated_intel["phishingLinks"].update(i.phishing_links)
+            if i.phone_numbers: aggregated_intel["phoneNumbers"].update(i.phone_numbers)
+            if i.suspicious_keywords: aggregated_intel["suspiciousKeywords"].update(i.suspicious_keywords)
+
+        # 2. Construct Payload
+        # Convert sets to lists
+        final_intel = {k: list(v) for k, v in aggregated_intel.items()}
+        
+        payload = {
+            "sessionId": session_id,
+            "scamDetected": scam_detected,
+            "totalMessagesExchanged": total_messages, 
+            "extractedIntelligence": final_intel,
+            "agentNotes": "Scam detected via heuristics and conversation analysis." if scam_detected else "Ongoing conversation."
+        }
+        
+        if scam_detected:
+            # 3. Send Request
+            url = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
+            # Using a very short timeout to not block if this was sync, but it's async so we can be generous
+            response = requests.post(url, json=payload, timeout=10)
+            logger.info(f"Callback sent for {session_id}. Status: {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Failed to send callback for {session_id}: {e}")
+
 @app.get("/", tags=["Health Check"])
 async def root():
     """Health check endpoint."""
@@ -59,81 +116,64 @@ async def root():
 
 @app.post("/v1/honeypot/engage", response_model=EngageResponse, tags=["Agent Logic"])
 async def engage(
-    payload: Dict[str, Any] = Body(...),
+    request: EngageRequest,
+    background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key),
     db: Session = Depends(get_db)
 ):
     """
-    Engages with a potential scammer, classifies the intent, 
-    and extracts intelligence. Saves interaction to DB.
-    Accepts generic JSON to support various tester formats.
+    Main endpoint for the Honeypot.
     """
-    # Flexible Extraction Logic
-    incoming_message = (
-        payload.get("incoming_message") or 
-        payload.get("text") or 
-        payload.get("message") or 
-        payload.get("content") or 
-        payload.get("input") or
-        payload.get("prompt")
-    )
-
-    # Ensure message is a string (handle nested JSON inputs)
-    if isinstance(incoming_message, (dict, list)):
-        incoming_message = json.dumps(incoming_message)
-    elif incoming_message is not None and not isinstance(incoming_message, str):
-        incoming_message = str(incoming_message)
+    session_id = request.sessionId
+    incoming_text = request.message.text
+    history = request.conversationHistory
     
-    conversation_id = payload.get("conversation_id", "unknown")
-    history = payload.get("history", [])
-
-    if not incoming_message:
-        # If we still can't find it, dump the keys to help user debug (in logs)
-        print(f"DEBUG: Failed to find message in payload keys: {list(payload.keys())}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Could not find a valid message field in request. Tried: incoming_message, text, message, content, input"
-        )
-
-    logger.info(f"Incoming engagement: conv_id={conversation_id}")
+    logger.info(f"Incoming engagement: session={session_id}")
     start_time = time.time()
     
     try:
-        is_scam, response_text, intelligence, delay = await agent.engage(
-            incoming_message, 
+        # Engage Agent
+        is_scam, reply_text, intelligence, delay = await agent.engage(
+            incoming_text, 
             history
         )
         process_time = time.time() - start_time
         
-        # Save to Database for persistence (The "Production" way)
+        # unique id for this interaction
+        interaction_id = f"{session_id}_{int(time.time() * 1000)}"
+        
+        # Save to Database
         db_interaction = Interaction(
-            id=f"{conversation_id}_{int(time.time())}",
-            incoming_message=incoming_message,
-            response_text=response_text,
+            id=interaction_id,
+            incoming_message=incoming_text,
+            response_text=reply_text,
             is_scam=is_scam,
             upi_ids=intelligence.upi_ids,
             bank_accounts=intelligence.bank_accounts,
             phishing_links=intelligence.phishing_links,
+            phone_numbers=intelligence.phone_numbers,
+            suspicious_keywords=intelligence.suspicious_keywords,
             suggested_delay=delay,
-            metadata_json={"process_time": f"{process_time:.2f}s"}
+            metadata_json={"process_time": f"{process_time:.2f}s", "sender": request.message.sender}
         )
         db.add(db_interaction)
         db.commit()
 
-        logger.info(f"Engagement processed: is_scam={is_scam}, duration={process_time:.2f}s")
+        # Trigger Callback if Scam Detected
+        if is_scam:
+             background_tasks.add_task(send_guvi_callback, session_id, db)
         
         return EngageResponse(
             status="success",
-            is_scam=is_scam,
-            response_text=response_text,
-            intelligence=intelligence,
-            suggested_delay_seconds=delay
+            reply=reply_text
         )
+
     except Exception as e:
         logger.error(f"Error in engagement: {str(e)}")
+        # Return a safe fallback error to keep protocol alive if possible, or 500
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An internal error occurred."
+            detail=f"Internal Error: {str(e)}"
         )
 
 @app.get("/v1/honeypot/engage", tags=["Help"])
@@ -168,10 +208,13 @@ async def get_intelligence(
                 "timestamp": s.timestamp,
                 "upi_ids": s.upi_ids,
                 "bank_accounts": s.bank_accounts,
-                "phishing_links": s.phishing_links
+                "phishing_links": s.phishing_links,
+                "phone_numbers": s.phone_numbers,
+                "suspicious_keywords": s.suspicious_keywords
             } for s in scams
         ]
     }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+

@@ -10,18 +10,22 @@ class HoneyPotAgent:
     Simulates an elderly persona to bait scammers into revealing PII.
     """
     def __init__(self):
-        # Regex patterns for intelligence extraction - refined for production
+        # Regex patterns for intelligence extraction
         self.upi_regex = re.compile(r'[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}')
         self.url_regex = re.compile(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+[/\w\.-]*')
         self.bank_regex = re.compile(r'\b\d{9,18}\b') 
-        
+        self.phone_regex = re.compile(r'\+?\d[\d -]{8,12}\d') # Basic phone matcher
+
         # Expanded keywords for better detection
         self.scam_indicators = {
-            "urgency": ["urgent", "immediately", "today", "blocked", "limit"],
+            "urgency": ["urgent", "immediately", "today", "blocked", "limit", "verify now"],
             "financial": ["payment", "bank", "kyc", "upi", "card", "account", "transfer"],
             "bait": ["lottery", "prize", "reward", "winner", "bonus", "gift"],
             "technical": ["link", "click", "app", "download", "apk", "verification"]
         }
+        
+        # Flatten indicators for keyword search
+        self.all_keywords = [w for cat in self.scam_indicators.values() for w in cat]
         
         # AI Client setup
         self.client = None
@@ -40,16 +44,13 @@ class HoneyPotAgent:
         if not text: return text
         chars = list(text)
         
-        # Typo: swapped letters (only one per message)
         if len(chars) > 10 and self._should_humanize(0.05):
             idx = random.randint(0, len(chars)-2)
             chars[idx], chars[idx+1] = chars[idx+1], chars[idx]
             
-        # Case fatigue: start with lowercase
         if self._should_humanize(0.3):
             chars[0] = chars[0].lower()
             
-        # Punctuation quirks
         res = "".join(chars)
         if self._should_humanize(0.25):
             res = res.replace(".", "...")
@@ -58,10 +59,24 @@ class HoneyPotAgent:
 
     def extract_intelligence(self, text: str) -> Intelligence:
         """Extracts technical details using refined regex."""
+        # Find suspicious keywords present in text
+        found_keywords = [k for k in self.all_keywords if k in text.lower()]
+        
+        # Filter out likely timestamps (13 digits starting with 17 or 18) from bank accounts
+        raw_accounts = self.bank_regex.findall(text)
+        valid_accounts = []
+        for acc in raw_accounts:
+            # 13 digits starting with 17 or 18 is likely a ms timestamp for ~2023-2029
+            if len(acc) == 13 and acc.startswith(("17", "18")):
+                continue
+            valid_accounts.append(acc)
+
         return Intelligence(
             upi_ids=list(set(self.upi_regex.findall(text))),
-            bank_accounts=list(set(self.bank_regex.findall(text))),
-            phishing_links=list(set(self.url_regex.findall(text)))
+            bank_accounts=list(set(valid_accounts)),
+            phishing_links=list(set(self.url_regex.findall(text))),
+            phone_numbers=list(set(self.phone_regex.findall(text))),
+            suspicious_keywords=list(set(found_keywords))
         )
 
     def classify_scam(self, message: str) -> bool:
@@ -69,7 +84,8 @@ class HoneyPotAgent:
         msg = message.lower()
         match_count = sum(1 for group in self.scam_indicators.values() 
                          for word in group if word in msg)
-        return match_count >= 2 # Require at least two indicators
+        # Low threshold for hackathon purposes - default to true if anything suspicious
+        return match_count >= 1
 
     def _get_simulated_response(self, message: str) -> str:
         """Fallback logic when AI is unavailable - feels like an old person."""
@@ -84,28 +100,36 @@ class HoneyPotAgent:
             body = random.choice([
                 "who is this? is this the electricity man again?",
                 "i'm trying to find my glasses... what did you say?",
-                "i hope this isn't a virus, my tablet made a funny sound."
+                "i hope this isn't a virus, my mobile made a funny sound."
             ])
             
         return f"{random.choice(prefixes)} {body}"
 
-    def generate_response(self, message: str, history: List[Dict[str, str]] = None) -> str:
+    def generate_response(self, message: str, history: List[Any] = None) -> str:
         """Primary response generation."""
         if self.client:
             try:
                 system_prompt = (
                     "IDENTITY: Martha, 74. Kind, technically illiterate, helpful but slow. "
                     "STYLE: Short sentences, few capital letters, occasional ellipses. "
-                    "NEVER mention AI. If asked for money/links, feign interest but act confused. "
+                    "GOAL: Waste the scammer's time. Feign interest but act confused. "
+                    "NEVER mention AI. "
                     "Try to get their UPI/bank account for 'manual payment'."
                 )
                 messages = [{"role": "system", "content": system_prompt}]
+                
                 if history:
-                    # Robust cleaning: only take items that look like valid messages
-                    for m in history[-5:]:
-                        if isinstance(m, dict) and "role" in m and "content" in m:
-                            messages.append({"role": m["role"], "content": m["content"]})
-                    
+                    # Map history format to OpenAI format
+                    # History item: {'sender': 'scammer'|'user', 'text': '...', ...}
+                    for m in history:
+                        # Ensure m is a dict or object with sender/text
+                        sender = getattr(m, 'sender', None) or m.get('sender')
+                        text = getattr(m, 'text', None) or m.get('text')
+                        
+                        if sender and text:
+                            role = "user" if sender == "scammer" else "assistant"
+                            messages.append({"role": role, "content": text})
+                
                 messages.append({"role": "user", "content": message})
                 
                 resp = self.client.chat.completions.create(
@@ -114,16 +138,19 @@ class HoneyPotAgent:
                     temperature=0.85
                 )
                 return self._humanize_text(resp.choices[0].message.content)
-            except Exception:
+            except Exception as e:
+                print(f"OpenAI Error: {e}")
                 pass
                 
         return self._humanize_text(self._get_simulated_response(message))
 
-    async def engage(self, message: str, history: List[Dict[str, str]] = None) -> Tuple[bool, str, Intelligence, float]:
+    async def engage(self, message: str, history: List[Any] = None) -> Tuple[bool, str, Intelligence, float]:
         """Orchestrates the honeypot engagement."""
         is_scam = self.classify_scam(message)
         intel = self.extract_intelligence(message)
         
+        # Only engage if it's a scam or we just want to reply
+        # For this challenge, we always reply to keep it going if requested
         response_text = self.generate_response(message, history)
         
         # Occasional "distraction" delay

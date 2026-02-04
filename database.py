@@ -22,6 +22,8 @@ class Interaction(Base):
     upi_ids = Column(JSON) # List of strings
     bank_accounts = Column(JSON)
     phishing_links = Column(JSON)
+    phone_numbers = Column(JSON)
+    suspicious_keywords = Column(JSON)
     suggested_delay = Column(Float)
     metadata_json = Column(JSON)
 

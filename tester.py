@@ -1,29 +1,40 @@
 """
-This Honeypot API Endpoint Tester allows participants to validate whether their deployed honeypot service is reachable, secured, and responding correctly. The tester verifies authentication, endpoint availability, and response behavior using a simple request.
+This Honeypot API Endpoint Tester validates compliance with the Hackathon Specification.
+It checks:
+1. Authentication (x-api-key)
+2. New Request Format (sessionId, message, etc.)
+3. New Response Format (status, reply)
+4. Intelligence Extraction (via separate endpoint)
 """
 import requests
 import json
 import sys
+import time
 
 def test_honeypot(base_url, api_key):
-    print(f"\n--- 👵 HoneyPot API Validation Tester ---")
+    print(f"\n--- 👵 HoneyPot API Validation Tester (Updated Spec) ---")
     print(f"Target: {base_url}\n")
 
     headers = {
-        "X-API-KEY": api_key,
+        "x-api-key": api_key,
         "Content-Type": "application/json"
     }
 
     # 1. Test Authentication (Missing Key)
-    print("[1/5] Testing Authentication (Missing Key)...", end=" ")
-    r = requests.post(f"{base_url}/v1/honeypot/engage", json={"incoming_message": "test"})
-    if r.status_code == 401:
-        print("✅ PASS (Received 401)")
+    print("[1/6] Testing Authentication (Missing Key)...", end=" ")
+    dummy_payload = {
+        "sessionId": "auth-test",
+        "message": {"sender": "scammer", "text": "hi"},
+        "conversationHistory": []
+    }
+    r = requests.post(f"{base_url}/v1/honeypot/engage", json=dummy_payload)
+    if r.status_code == 401 or r.status_code == 403:
+        print("✅ PASS (Received 401/403)")
     else:
         print(f"❌ FAIL (Received {r.status_code})")
 
     # 2. Test Health Check (Connectivity)
-    print("[2/5] Testing Connectivity (Health Check)...", end=" ")
+    print("[2/6] Testing Connectivity (Health Check)...", end=" ")
     r = requests.get(f"{base_url}/")
     if r.status_code == 200:
         print("✅ PASS")
@@ -31,39 +42,74 @@ def test_honeypot(base_url, api_key):
         print(f"❌ FAIL (Received {r.status_code})")
 
     # 3. Test Request Handling (Valid Payload)
-    print("[3/5] Testing Request Handling...", end=" ")
+    print("[3/6] Testing SCAM Request Handling...", end=" ")
+    
+    session_id = f"validation_test_{int(time.time())}"
+    scam_text = "Hello, pay me 5000 via UPI: scammer@oksbi or click http://evil-link.com to avoid account block."
+    
     payload = {
-        "conversation_id": "validation_test_123",
-        "incoming_message": "Hello, pay me 5000 via UPI: scammer@oksbi or click http://evil-link.com",
-        "history": []
+        "sessionId": session_id,
+        "message": {
+            "sender": "scammer",
+            "text": scam_text,
+            "timestamp": int(time.time() * 1000)
+        },
+        "conversationHistory": [],
+        "metadata": {"channel": "TEST"}
     }
+    
     r = requests.post(f"{base_url}/v1/honeypot/engage", headers=headers, json=payload)
+    
     if r.status_code == 200:
         print("✅ PASS")
     else:
         print(f"❌ FAIL (Received {r.status_code})")
+        print(f"Response: {r.text}")
         return
 
     # 4. Test Response Structure
-    print("[4/5] Testing Response Structure...", end=" ")
-    data = r.json()
-    required_keys = ["status", "is_scam", "response_text", "intelligence", "suggested_delay_seconds"]
-    if all(k in data for k in required_keys):
-        print("✅ PASS")
-    else:
-        print(f"❌ FAIL (Missing keys: {[k for k in required_keys if k not in data]})")
+    print("[4/6] Testing Response Structure...", end=" ")
+    try:
+        data = r.json()
+        required_keys = ["status", "reply"]
+        if all(k in data for k in required_keys) and data["status"] == "success":
+            print("✅ PASS")
+            print(f"   Agent Reply: \"{data['reply']}\"")
+        else:
+            print(f"❌ FAIL (Missing keys or wrong status: {data})")
+    except Exception as e:
+        print(f"❌ FAIL (JSON Error: {e})")
 
-    # 5. Test Honeypot Behavior (Extraction & Classification)
-    print("[5/5] Testing Honeypot Behavior...", end=" ")
-    if data.get("is_scam") is True and \
-       "scammer@oksbi" in data["intelligence"]["upi_ids"] and \
-       "http://evil-link.com" in data["intelligence"]["phishing_links"]:
-        print("✅ PASS (Scam detected & Intel extracted)")
+    # 5. Test Persistence & Intelligence Extraction
+    print("[5/6] Verifying Intelligence Extraction...", end=" ")
+    # Give DB a moment to settle if async
+    time.sleep(1)
+    
+    r_intel = requests.get(f"{base_url}/v1/honeypot/intelligence", headers=headers)
+    if r_intel.status_code == 200:
+        intel_data = r_intel.json()
+        
+        # We need to find our specific interaction or just check if the new intel exists in the aggregate
+        # The intel endpoint returns a list of reports.
+        reports = intel_data.get("reports", [])
+        
+        # Find our report by checking if the upi/link appears in any report
+        found_scam = False
+        for report in reports:
+            if "scammer@oksbi" in report.get("upi_ids", []) and \
+               "http://evil-link.com" in report.get("phishing_links", []):
+                found_scam = True
+                break
+        
+        if found_scam:
+            print("✅ PASS (Scam detected & Intel saved)")
+        else:
+            print("❌ FAIL (Could not find extracted intel in DB)")
+            print(f"Raw Intel Response: {json.dumps(intel_data, indent=2)}")
     else:
-        print("❌ FAIL (Scam logic failed)")
+        print(f"❌ FAIL (Intel Endpoint Error: {r_intel.status_code})")
 
     print("\n--- Validation Complete ---")
-    print("Note: This tester is for validation only. The final evaluation will involve automated security interaction scenarios.")
 
 if __name__ == "__main__":
     # Change these defaults or pass as arguments
