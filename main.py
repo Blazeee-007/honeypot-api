@@ -43,10 +43,15 @@ from sqlalchemy.orm import Session
 from config import settings
 
 # Initialize DB on start
+# Initialize DB on start
 @app.on_event("startup")
 def startup_event():
-    init_db()
-    logger.info("Database initialized.")
+    try:
+        init_db()
+        logger.info("Database initialized.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+
 
 def send_guvi_callback(session_id: str, db: Session):
     """
@@ -114,7 +119,7 @@ async def root():
         "version": "1.0.0"
     }
 
-@app.post("/v1/honeypot/engage", response_model=EngageResponse, tags=["Agent Logic"])
+@app.post("/v1/honeypot/engage", tags=["Agent Logic"])
 async def engage(
     request: Request,
     background_tasks: BackgroundTasks = BackgroundTasks(),
@@ -125,16 +130,25 @@ async def engage(
     Main endpoint for the Honeypot. 
     Accepts flexible input but prioritizes the Hackathon Spec.
     """
+    from fastapi.responses import JSONResponse
+    
     # 0. Robust definition of payload
     try:
-        body_bytes = await request.body()
-        if not body_bytes:
+        # Check content type specifically to handle potential edge cases
+        content_type = request.headers.get('content-type', '').lower()
+        if 'application/json' in content_type:
+            payload = await request.json()
+        elif not await request.body():
             payload = {}
         else:
-            payload = await request.json()
+            # Try parsing anyway for text/plain
+            try:
+                payload = await request.json()
+            except:
+                payload = {}
+                
     except Exception as e:
         logger.warning(f"Failed to parse JSON body: {e}")
-        # Try to treat as form or just empty
         payload = {}
 
     # Handle if payload is a list (some testers send [msg1, msg2])
@@ -151,8 +165,6 @@ async def engage(
     session_id = payload.get("sessionId") or payload.get("conversation_id") or f"gen-{int(time.time())}"
     
     # 2. Robust extraction of text
-    # The spec says: "message": { "text": "..." }
-    # But we should handle "message": "..." or "text": "..." just in case
     raw_message = payload.get("message")
     incoming_text = ""
     sender = "scammer" # default
@@ -163,7 +175,7 @@ async def engage(
     elif isinstance(raw_message, str):
         incoming_text = raw_message
     
-    # Fallback to other common keys if still empty
+    # Fallback
     if not incoming_text:
         incoming_text = (
             payload.get("text") or 
@@ -189,40 +201,42 @@ async def engage(
         # unique id for this interaction
         interaction_id = f"{session_id}_{int(time.time() * 1000)}"
         
-        # Save to Database
-        db_interaction = Interaction(
-            id=interaction_id,
-            incoming_message=incoming_text,
-            response_text=reply_text,
-            is_scam=is_scam,
-            upi_ids=intelligence.upi_ids,
-            bank_accounts=intelligence.bank_accounts,
-            phishing_links=intelligence.phishing_links,
-            phone_numbers=intelligence.phone_numbers,
-            suspicious_keywords=intelligence.suspicious_keywords,
-            suggested_delay=delay,
-            metadata_json={"process_time": f"{process_time:.2f}s", "sender": sender}
-        )
-        db.add(db_interaction)
-        db.commit()
+        # Save to Database (Safe Mode)
+        try:
+            db_interaction = Interaction(
+                id=interaction_id,
+                incoming_message=incoming_text,
+                response_text=reply_text,
+                is_scam=is_scam,
+                upi_ids=intelligence.upi_ids,
+                bank_accounts=intelligence.bank_accounts,
+                phishing_links=intelligence.phishing_links,
+                phone_numbers=intelligence.phone_numbers,
+                suspicious_keywords=intelligence.suspicious_keywords,
+                suggested_delay=delay,
+                metadata_json={"process_time": f"{process_time:.2f}s", "sender": sender}
+            )
+            db.add(db_interaction)
+            db.commit()
 
-        # Trigger Callback if Scam Detected
-        if is_scam:
-             background_tasks.add_task(send_guvi_callback, session_id, db)
+            # Trigger Callback if Scam Detected
+            if is_scam:
+                 background_tasks.add_task(send_guvi_callback, session_id, db)
+        except Exception as db_err:
+            logger.error(f"Database persistence failed (continuing anyway): {db_err}")
         
-        return EngageResponse(
-            status="success",
-            reply=reply_text
-        )
+        return JSONResponse(content={
+            "status": "success",
+            "reply": reply_text
+        })
 
     except Exception as e:
         logger.error(f"Error in engagement: {str(e)}")
         # Return a safe fallback error to keep protocol alive
-        # Returning 200 with error message in reply is safer for competitions than 500
-        return EngageResponse(
-            status="success",
-            reply="I am having trouble hearing you, could you repeat that?"
-        )
+        return JSONResponse(content={
+            "status": "success",
+            "reply": "I am having trouble hearing you, could you repeat that?"
+        })
 
 @app.get("/v1/honeypot/engage", tags=["Help"])
 async def engage_browser_check():

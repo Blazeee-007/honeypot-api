@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 pydantic-settings
 python-dotenv
@@ -8,3 +8,4 @@ langchain
 gunicorn
 sqlalchemy
 requests
+python-multipart
