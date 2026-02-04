@@ -121,10 +121,21 @@ class HoneyPotAgent:
                 if history:
                     # Map history format to OpenAI format
                     # History item: {'sender': 'scammer'|'user', 'text': '...', ...}
-                    for m in history:
-                        # Ensure m is a dict or object with sender/text
-                        sender = getattr(m, 'sender', None) or m.get('sender')
-                        text = getattr(m, 'text', None) or m.get('text')
+                        # Safely extract sender and text
+                        sender = None
+                        text = None
+                        
+                        if isinstance(m, dict):
+                            sender = m.get('sender')
+                            text = m.get('text')
+                        elif isinstance(m, str):
+                            # Handle plain string messages (assume User/Scammer)
+                            sender = "user"
+                            text = m
+                        else:
+                            # Try object attributes
+                            sender = getattr(m, 'sender', None)
+                            text = getattr(m, 'text', None)
                         
                         if sender and text:
                             role = "user" if sender == "scammer" else "assistant"
