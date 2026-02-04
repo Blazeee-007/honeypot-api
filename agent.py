@@ -121,6 +121,7 @@ class HoneyPotAgent:
                 if history:
                     # Map history format to OpenAI format
                     # History item: {'sender': 'scammer'|'user', 'text': '...', ...}
+                    for m in history:
                         # Safely extract sender and text
                         sender = None
                         text = None
