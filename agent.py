@@ -31,8 +31,8 @@ class HoneyPotAgent:
         self.client = None
         if settings.OPENAI_API_KEY:
             try:
-                from openai import OpenAI
-                self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                from openai import AsyncOpenAI
+                self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
             except ImportError:
                 pass
 
@@ -105,7 +105,7 @@ class HoneyPotAgent:
             
         return f"{random.choice(prefixes)} {body}"
 
-    def generate_response(self, message: str, history: List[Any] = None) -> str:
+    async def generate_response(self, message: str, history: List[Any] = None) -> str:
         """Primary response generation."""
         if self.client:
             try:
@@ -144,7 +144,7 @@ class HoneyPotAgent:
                 
                 messages.append({"role": "user", "content": message})
                 
-                resp = self.client.chat.completions.create(
+                resp = await self.client.chat.completions.create(
                     model=settings.OPENAI_MODEL,
                     messages=messages,
                     temperature=0.85
@@ -163,7 +163,7 @@ class HoneyPotAgent:
         
         # Only engage if it's a scam or we just want to reply
         # For this challenge, we always reply to keep it going if requested
-        response_text = self.generate_response(message, history)
+        response_text = await self.generate_response(message, history)
         
         # Occasional "distraction" delay
         delay_base = len(response_text.split()) / 12  # Slow typing speed
